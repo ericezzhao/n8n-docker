@@ -1,0 +1,10 @@
+{
+  "/app/monitored-folder/verification-test.txt": {
+    "name": "verification-test.txt",
+    "size": 128,
+    "sizeFormatted": "128 Bytes",
+    "modified": "2025-06-30T20:15:54.708Z",
+    "created": "1970-01-01T00:00:00.000Z",
+    "extension": ".txt"
+  }
+}

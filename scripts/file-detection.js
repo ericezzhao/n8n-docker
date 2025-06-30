@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * File Detection Script
- * Detects new files in the monitored folder and logs detailed information
+ * Enhanced File Detection Script
+ * Detects new files, edited files, and deleted files with detailed logging
  */
 
 const fs = require('fs');
@@ -10,6 +10,7 @@ const path = require('path');
 
 // Configuration
 const MONITORED_FOLDER = process.env.MONITORED_FOLDER || '/app/monitored-folder';
+const STATE_FILE = process.env.STATE_FILE || '/app/scripts/file-state.json';
 const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
 
 /**
@@ -29,6 +30,17 @@ function log(level, message, data = null) {
     if (data) {
         console.log(`[${timestamp}] [${level.toUpperCase()}] Additional Data:`, JSON.stringify(data, null, 2));
     }
+}
+
+/**
+ * Formats bytes in human readable format
+ */
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
 /**
@@ -55,80 +67,174 @@ function getFileInfo(filePath) {
 }
 
 /**
- * Formats bytes in human readable format
+ * Load previous file state from state file
  */
-function formatBytes(bytes) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+function loadPreviousState() {
+    try {
+        if (fs.existsSync(STATE_FILE)) {
+            const stateData = fs.readFileSync(STATE_FILE, 'utf8');
+            return JSON.parse(stateData);
+        }
+    } catch (error) {
+        log('warn', 'Failed to load previous state, starting fresh', { error: error.message });
+    }
+    return {};
 }
 
 /**
- * Detects and processes new files
+ * Save current file state to state file
  */
-function detectFiles(detectedFiles = []) {
-    log('info', `🔍 Scanning for new documents in: ${MONITORED_FOLDER}`);
+function saveCurrentState(currentState) {
+    try {
+        // Ensure directory exists
+        const stateDir = path.dirname(STATE_FILE);
+        if (!fs.existsSync(stateDir)) {
+            fs.mkdirSync(stateDir, { recursive: true });
+        }
+        
+        fs.writeFileSync(STATE_FILE, JSON.stringify(currentState, null, 2));
+        log('debug', `State saved to ${STATE_FILE}`);
+    } catch (error) {
+        log('error', 'Failed to save current state', { error: error.message });
+    }
+}
+
+/**
+ * Get current state of all files in monitored folder
+ */
+function getCurrentState() {
+    const currentState = {};
     
     try {
-        // Check if monitored folder exists
         if (!fs.existsSync(MONITORED_FOLDER)) {
             log('error', `Monitored folder does not exist: ${MONITORED_FOLDER}`);
-            return;
+            return currentState;
         }
 
         const files = fs.readdirSync(MONITORED_FOLDER);
-        log('debug', `Found ${files.length} items in monitored folder`);
-
-        if (files.length === 0) {
-            log('info', '📭 No files found in monitored folder');
-            return;
-        }
-
-        let processedCount = 0;
-
+        
         files.forEach(fileName => {
             const filePath = path.join(MONITORED_FOLDER, fileName);
             const fileInfo = getFileInfo(filePath);
             
             if (fileInfo && fileInfo.isFile) {
-                processedCount++;
-                
-                // Check if this is a "new" file (for this demonstration, we'll treat files passed in as new)
-                const isNewFile = detectedFiles.length === 0 || detectedFiles.includes(filePath);
-                
-                if (isNewFile || detectedFiles.length === 0) {
-                    log('info', `📄 NEW DOCUMENT DETECTED: ${fileInfo.name}`, {
-                        fullPath: fileInfo.path,
-                        size: fileInfo.sizeFormatted,
-                        extension: fileInfo.extension || 'no extension',
-                        modified: fileInfo.modified,
-                        created: fileInfo.created
-                    });
-                    
-                    // Additional debugging info
-                    log('debug', `File processing details`, {
-                        absolutePath: path.resolve(filePath),
-                        relativeToScript: path.relative(__dirname, filePath),
-                        stats: {
-                            readable: fs.constants.R_OK,
-                            writable: fs.constants.W_OK
-                        }
-                    });
-                }
+                currentState[filePath] = {
+                    name: fileInfo.name,
+                    size: fileInfo.size,
+                    sizeFormatted: fileInfo.sizeFormatted,
+                    modified: fileInfo.modified,
+                    created: fileInfo.created,
+                    extension: fileInfo.extension
+                };
             }
         });
-
-        log('info', `✅ Scan complete. Processed ${processedCount} files`);
         
     } catch (error) {
-        log('error', 'Failed to scan monitored folder', { 
-            error: error.message,
-            stack: error.stack,
-            folder: MONITORED_FOLDER 
-        });
+        log('error', 'Failed to get current state', { error: error.message });
     }
+    
+    return currentState;
+}
+
+/**
+ * Compare current state with previous state and detect changes
+ */
+function detectChanges() {
+    log('info', `🔍 Scanning for file changes in: ${MONITORED_FOLDER}`);
+    
+    const previousState = loadPreviousState();
+    const currentState = getCurrentState();
+    
+    const changes = {
+        newFiles: [],
+        editedFiles: [],
+        deletedFiles: []
+    };
+    
+    // Detect new and edited files
+    for (const [filePath, fileInfo] of Object.entries(currentState)) {
+        if (!previousState[filePath]) {
+            // File didn't exist before - it's new
+            changes.newFiles.push({ filePath, fileInfo });
+        } else if (previousState[filePath].modified !== fileInfo.modified) {
+            // File existed but modification time changed - it's edited
+            changes.editedFiles.push({ 
+                filePath, 
+                fileInfo, 
+                previousInfo: previousState[filePath] 
+            });
+        }
+    }
+    
+    // Detect deleted files
+    for (const [filePath, fileInfo] of Object.entries(previousState)) {
+        if (!currentState[filePath]) {
+            // File existed before but not now - it's deleted
+            changes.deletedFiles.push({ filePath, fileInfo });
+        }
+    }
+    
+    // Report findings
+    reportChanges(changes);
+    
+    // Save current state for next run
+    saveCurrentState(currentState);
+    
+    return changes;
+}
+
+/**
+ * Report detected changes with detailed logging
+ */
+function reportChanges(changes) {
+    const totalChanges = changes.newFiles.length + changes.editedFiles.length + changes.deletedFiles.length;
+    
+    if (totalChanges === 0) {
+        log('info', '📭 No file changes detected');
+        return;
+    }
+    
+    log('info', `📊 Found ${totalChanges} file changes:`);
+    
+    // Report new files
+    changes.newFiles.forEach(({ filePath, fileInfo }) => {
+        log('info', `📄 NEW FILE CREATED: ${fileInfo.name}`, {
+            fullPath: filePath,
+            size: fileInfo.sizeFormatted,
+            extension: fileInfo.extension || 'no extension',
+            created: fileInfo.created,
+            modified: fileInfo.modified
+        });
+    });
+    
+    // Report edited files
+    changes.editedFiles.forEach(({ filePath, fileInfo, previousInfo }) => {
+        const sizeChange = fileInfo.size - previousInfo.size;
+        const sizeChangeFormatted = sizeChange > 0 ? `+${formatBytes(Math.abs(sizeChange))}` : `-${formatBytes(Math.abs(sizeChange))}`;
+        
+        log('info', `✏️ FILE EDITED: ${fileInfo.name}`, {
+            fullPath: filePath,
+            currentSize: fileInfo.sizeFormatted,
+            previousSize: previousInfo.sizeFormatted,
+            sizeChange: sizeChangeFormatted,
+            previousModified: previousInfo.modified,
+            currentModified: fileInfo.modified,
+            extension: fileInfo.extension || 'no extension'
+        });
+    });
+    
+    // Report deleted files
+    changes.deletedFiles.forEach(({ filePath, fileInfo }) => {
+        log('info', `🗑️ FILE DELETED: ${fileInfo.name}`, {
+            fullPath: filePath,
+            lastSize: fileInfo.sizeFormatted,
+            lastModified: fileInfo.modified,
+            extension: fileInfo.extension || 'no extension'
+        });
+    });
+    
+    // Summary
+    log('info', `✅ Change detection complete. New: ${changes.newFiles.length}, Edited: ${changes.editedFiles.length}, Deleted: ${changes.deletedFiles.length}`);
 }
 
 /**
@@ -136,30 +242,25 @@ function detectFiles(detectedFiles = []) {
  */
 function main() {
     const startTime = new Date();
-    log('info', '🚀 File Detection Script Started');
+    log('info', '🚀 Enhanced File Detection Script Started');
     log('debug', 'Environment Information', {
         nodeVersion: process.version,
         platform: process.platform,
         workingDirectory: process.cwd(),
         scriptPath: __filename,
         monitoredFolder: MONITORED_FOLDER,
+        stateFile: STATE_FILE,
         logLevel: LOG_LEVEL
     });
 
-    // If files are passed as arguments, treat them as newly detected files
-    const detectedFiles = process.argv.slice(2);
-    
-    if (detectedFiles.length > 0) {
-        log('info', `Processing ${detectedFiles.length} files passed as arguments`);
-        detectFiles(detectedFiles);
-    } else {
-        // Scan the entire folder
-        detectFiles();
-    }
+    // Detect all types of changes (new, edited, deleted)
+    const changes = detectChanges();
 
     const endTime = new Date();
     const duration = endTime - startTime;
     log('info', `🏁 File Detection Script Completed in ${duration}ms`);
+    
+    return changes;
 }
 
 // Run the script if called directly
@@ -169,7 +270,11 @@ if (require.main === module) {
 
 // Export functions for use in other modules
 module.exports = {
-    detectFiles,
+    detectChanges,
+    getCurrentState,
+    loadPreviousState,
+    saveCurrentState,
+    reportChanges,
     getFileInfo,
     log,
     formatBytes

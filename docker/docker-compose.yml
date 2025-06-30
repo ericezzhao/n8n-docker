@@ -16,6 +16,7 @@ services:
       - EXECUTIONS_DATA_SAVE_ON_ERROR=all
       - EXECUTIONS_DATA_SAVE_ON_SUCCESS=all
       - N8N_LOG_LEVEL=info
+      - STATE_FILE=/home/node/.n8n/state/file-state.json
     volumes:
       # Persistent data for n8n
       - ./n8n-data:/home/node/.n8n

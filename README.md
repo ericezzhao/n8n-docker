@@ -4,11 +4,11 @@ Automated file monitoring system using Docker and n8n that detects when new docu
 
 ## System Pipeline
 
-- Monitors a folder for new files and content changes every minute
+- Monitors a folder for new files and content changes
 - Automatically triggers scripts when files are detected
 - Provides logging with timestamps, file metadata, and debugging information
 - Runs in Docker for easy deployment and portability
-- Uses n8n for visual automation management and for automation capabilities
+- Uses n8n for visual automation management and automation capabilities
 
 ## 🚀 Quick Setup
 
@@ -59,37 +59,12 @@ docker ps
 3. **Create new workflow** with these nodes:
 
 #### Node 1: Schedule Trigger
-- **Trigger**: Every [your choice of time detection, I used 30 seconds]
+- Trigger: Every [your choice of time detection, I used 30 seconds]
 
-#### Node 2: Execute Command (File Detection)
-- **Command**: `find /app/monitored-folder -type f -mmin -1`
+#### Node 2: Execute Command 
+- Command: node /app/scripts/file-detection.js
 
-#### Node 3: IF Node
-- **Condition**: `{{ $json.stdout.trim().length > 0 }}`
-
-#### Node 4: Execute Command (Script Execution)
-Connect to the TRUE branch of the IF node:
-- **Command**: `sh -c 'FILES=$(echo "{{ $json.stdout }}"); if [ ! -z "$FILES" ]; then node /app/scripts/file-detection.js $FILES; fi'`
-
-### 6. Test
-
-```bash
-# Create a test file
-echo "Test document $(date)" > monitored-folder/test-file.txt
-
-# Watch n8n execution logs for detection
-```
-
-Example output in n8n logs:
-```
-[2025-06-30T19:00:35.787Z] [INFO] 📄 NEW DOCUMENT DETECTED: test-file.txt
-[2025-06-30T19:00:35.787Z] [INFO] Additional Data: {
-  "fullPath": "/app/monitored-folder/test-file.txt",
-  "size": "25 Bytes",
-  "extension": ".txt",
-  "modified": "2025-06-30T19:00:35.123Z"
-}
-```
+### 6. Run and view execution logs
 
 ## References
 https://docs.n8n.io/ 
