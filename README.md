@@ -10,7 +10,7 @@ Automated file monitoring system using Docker and n8n that detects when new docu
 - Runs in Docker for easy deployment and portability
 - Uses n8n for visual automation management and automation capabilities
 
-## 🚀 Quick Setup
+## Quick Setup
 
 ### 1. Project Structure
 
@@ -68,4 +68,5 @@ docker ps
 
 ## References
 https://docs.n8n.io/ 
+
 https://docs.n8n.io/hosting/installation/docker/
